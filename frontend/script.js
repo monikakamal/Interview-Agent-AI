@@ -1,778 +1,379 @@
 document.addEventListener("DOMContentLoaded", () => {
 
     // ============================================================
-    // DOM ELEMENTS
-    // ============================================================
-
-    const responseInput =
-        document.getElementById("response-input");
-
-    const sendBtn =
-        document.querySelector(".btn-success");
-
-    const speechBubble =
-        document.querySelector(".speech-bubble");
-
-    const questionDetails =
-        document.querySelector(".question-card p");
-
-    const questionBadge =
-        document.querySelector(".badge-blue");
-
-    const typingIndicator =
-        document.querySelector(".typing-indicator");
-
-    const endInterviewBtn =
-        document.querySelector(".btn-danger");
-
-    const tabs =
-        document.querySelectorAll(".tab");
-
-    const elapsedTimeEl =
-        document.querySelector(
-            ".bottom-bar div:nth-child(1) strong"
-        );
-
-    const completedQuestionsEl =
-        document.querySelector(
-            ".bottom-bar div:nth-child(2) strong"
-        );
-
-    const scoreTextEl =
-        document.querySelector(".score-text");
-
-
-    // ============================================================
     // BACKEND CONFIGURATION
     // ============================================================
 
-    const API_BASE =
-        "http://127.0.0.1:8000";
-
-    const INTERVIEW_ENDPOINT =
-        `${API_BASE}/api/interview`;
-
+    const API_BASE = (typeof window !== "undefined" && window.location && window.location.origin && window.location.origin.startsWith("http")) 
+        ? window.location.origin 
+        : "http://127.0.0.1:8000";
+    const INTERVIEW_ENDPOINT = `${API_BASE}/api/interview`;
 
     // ============================================================
-    // INTERVIEW STATE
+    // STATE
     // ============================================================
 
-    let currentQuestion = 0;
-
+    let questionCount = 0;
     const totalMinQuestions = 8;
-
-    let secondsElapsed = 0;
-
-    let timerInterval = null;
-
     let sessionId = null;
-
-    let candidateId = "MONIK_SHARMA";
-
     let interviewStarted = false;
-
     let interviewCompleted = false;
-
+    let requestInProgress = false;
 
     // ============================================================
-    // TIMER
+    // DOM ELEMENTS
     // ============================================================
 
-    function startTimer() {
+    const candidateInput = document.getElementById("candidateId");
+    const startBtn = document.getElementById("startBtn");
+    const sendBtn = document.getElementById("sendBtn");
+    const endBtn = document.getElementById("endBtn");
+    const userInput = document.getElementById("userInput");
+    const chatBox = document.getElementById("chatBox");
+    const qCount = document.getElementById("qCount");
+    const typingIndicator = document.getElementById("typingIndicator");
+    const feedbackModal = document.getElementById("feedbackModal");
+    const feedbackContent = document.getElementById("feedbackContent");
+    const closeModalBtn = document.getElementById("closeModalBtn");
 
-        if (timerInterval !== null) {
-            return;
+    // ============================================================
+    // UPDATE QUESTION COUNTER
+    // ============================================================
+
+    function updateCounter() {
+        if (qCount) {
+            qCount.textContent = questionCount;
         }
-
-        timerInterval = setInterval(() => {
-
-            secondsElapsed++;
-
-            const mins =
-                String(
-                    Math.floor(secondsElapsed / 60)
-                ).padStart(2, "0");
-
-            const secs =
-                String(
-                    secondsElapsed % 60
-                ).padStart(2, "0");
-
-            if (elapsedTimeEl) {
-
-                elapsedTimeEl.textContent =
-                    `${mins}:${secs}`;
-            }
-
-        }, 1000);
     }
 
-
-    startTimer();
-
-
     // ============================================================
-    // TAB SWITCHING
+    // APPEND MESSAGE
     // ============================================================
 
-    tabs.forEach((tab) => {
+    function appendMessage(sender, message) {
+        if (!chatBox) return;
 
-        tab.addEventListener("click", () => {
+        const wrapper = document.createElement("div");
 
-            tabs.forEach((t) => {
-                t.classList.remove("active");
-            });
+        if (sender === "user") {
+            wrapper.className = "flex justify-end";
+            const bubble = document.createElement("div");
+            bubble.className = "bg-indigo-600 text-white rounded-xl py-2 px-4 max-w-[80%] text-sm whitespace-pre-wrap";
+            bubble.textContent = String(message ?? "");
+            wrapper.appendChild(bubble);
+        }
+        else if (sender === "agent") {
+            wrapper.className = "flex justify-start";
+            const bubble = document.createElement("div");
+            bubble.className = "bg-slate-800 border border-slate-700 text-slate-100 rounded-xl py-3 px-4 max-w-[85%] text-sm flex gap-3";
 
-            tab.classList.add("active");
+            const icon = document.createElement("i");
+            icon.className = "fa-solid fa-robot text-indigo-400 mt-1";
+
+            const text = document.createElement("div");
+            text.className = "whitespace-pre-wrap";
+            text.textContent = String(message ?? "");
+
+            bubble.appendChild(icon);
+            bubble.appendChild(text);
+            wrapper.appendChild(bubble);
+        }
+        else {
+            wrapper.className = "text-center text-xs text-slate-500 my-2";
+            wrapper.textContent = String(message ?? "");
+        }
+
+        chatBox.appendChild(wrapper);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // ============================================================
+    // LOADING INDICATOR
+    // ============================================================
+
+    function setLoading(isLoading) {
+        if (!typingIndicator) return;
+        if (isLoading) {
+            typingIndicator.classList.remove("hidden");
+        } else {
+            typingIndicator.classList.add("hidden");
+        }
+    }
+
+    // ============================================================
+    // ENABLE / DISABLE INPUTS
+    // ============================================================
+
+    function enableInput() {
+        if (userInput) userInput.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
+        if (endBtn) endBtn.classList.remove("hidden");
+        if (userInput) {
+            userInput.placeholder = "Type your technical response here...";
+            userInput.focus();
+        }
+    }
+
+    function disableInput() {
+        if (userInput) userInput.disabled = true;
+        if (sendBtn) sendBtn.disabled = true;
+    }
+
+    // ============================================================
+    // API CALL HELPER
+    // ============================================================
+
+    async function callInterviewAPI(payload) {
+        const response = await fetch(INTERVIEW_ENDPOINT, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
         });
 
-    });
-
-
-    // ============================================================
-    // TYPING EFFECT
-    // ============================================================
-
-    function streamAIText(
-        text,
-        targetElement,
-        callback
-    ) {
-
-        if (!targetElement) {
-            return;
+        let data;
+        try {
+            data = await response.json();
+        } catch (error) {
+            throw new Error("Backend returned invalid JSON.");
         }
 
-        targetElement.textContent = "";
-
-        let index = 0;
-
-        if (typingIndicator) {
-            typingIndicator.style.display = "block";
+        if (!response.ok) {
+            const errorMessage =
+                data?.detail ||
+                data?.message ||
+                `Backend error: HTTP ${response.status}`;
+            throw new Error(errorMessage);
         }
 
-
-        const interval =
-            setInterval(() => {
-
-                if (index < text.length) {
-
-                    targetElement.textContent +=
-                        text.charAt(index);
-
-                    index++;
-
-                } else {
-
-                    clearInterval(interval);
-
-                    if (typingIndicator) {
-                        typingIndicator.style.display =
-                            "none";
-                    }
-
-                    if (callback) {
-                        callback();
-                    }
-                }
-
-            }, 20);
+        return data;
     }
-
 
     // ============================================================
     // START INTERVIEW
     // ============================================================
 
     async function startInterview() {
+        if (requestInProgress) return;
 
-        if (interviewStarted) {
+        const candidateId = candidateInput ? candidateInput.value.trim() : "cand_001";
+
+        if (!candidateId) {
+            alert("Please enter Candidate ID.");
+            if (candidateInput) candidateInput.focus();
             return;
         }
 
-        /*
-         * Generate unique session ID.
-         *
-         * Every candidate gets a separate interview session.
-         */
-        sessionId =
-            `${candidateId}-${Date.now()}`;
+        requestInProgress = true;
+        if (startBtn) startBtn.disabled = true;
+        if (chatBox) chatBox.innerHTML = "";
+        disableInput();
+        setLoading(true);
 
+        appendMessage("system", "Starting interview and loading candidate profile...");
+
+        sessionId = `${candidateId}-${Date.now()}`;
 
         try {
+            // ==========================================
+            // YE WALA CODE YAHAN PASS KARNA HAI:
+            // ==========================================
+            const data = await callInterviewAPI({
+                sessionId: sessionId,
+                candidateId: candidateId,
+                candidate: {
+                    id: candidateId,
+                    name: "Candidate",
+                    completed_missions: [],
+                    current_status: "active"
+                }
+            });
 
-            if (typingIndicator) {
-                typingIndicator.style.display =
-                    "block";
+            if (data.sessionId) {
+                sessionId = data.sessionId;
             }
-
-
-            const response =
-                await fetch(
-                    INTERVIEW_ENDPOINT,
-                    {
-                        method: "POST",
-
-                        headers: {
-                            "Content-Type":
-                                "application/json"
-                        },
-
-                        body: JSON.stringify({
-
-                            sessionId:
-                                sessionId,
-
-                            candidateId:
-                                candidateId
-
-                        })
-                    }
-                );
-
-
-            const data =
-                await response.json();
-
-
-            if (!response.ok) {
-
-                throw new Error(
-                    data.detail ||
-                    "Unable to start interview."
-                );
-            }
-
 
             interviewStarted = true;
-
             interviewCompleted = false;
+            questionCount = 1;
+            updateCounter();
 
-            currentQuestion = 1;
-
-
-            updateProgress();
-
-
-            streamAIText(
-                data.reply || "Interview started.",
-                speechBubble,
-                () => {
-
-                    questionDetails.textContent =
-                        "Please provide your answer below.";
-
-                }
-            );
-
+            appendMessage("agent", data.reply || "Welcome! Let's begin the technical interview.");
+            enableInput();
 
         } catch (error) {
+            console.error("Start Interview Error:", error);
+            sessionId = null;
+            interviewStarted = false;
 
-            console.error(
-                "Start Interview Error:",
-                error
-            );
-
-
-            if (typingIndicator) {
-                typingIndicator.style.display =
-                    "none";
-            }
-
-
-            showError(
-                error.message
-            );
+            appendMessage("system", `Unable to connect to backend: ${error.message}`);
+            if (startBtn) startBtn.disabled = false;
+        } finally {
+            requestInProgress = false;
+            setLoading(false);
         }
     }
 
-
     // ============================================================
-    // SEND CANDIDATE ANSWER
+    // SEND MESSAGE / ANSWER
     // ============================================================
 
-    async function handleSendAnswer() {
-
-        const userText =
-            responseInput.value.trim();
-
-
-        if (!userText) {
+    async function sendMessage() {
+        if (requestInProgress || !interviewStarted || interviewCompleted) {
             return;
         }
 
+        const text = userInput ? userInput.value.trim() : "";
+        if (!text) return;
 
         if (!sessionId) {
-
-            showError(
-                "Interview has not been started."
-            );
-
+            appendMessage("system", "Invalid interview session.");
             return;
         }
 
+        requestInProgress = true;
+        disableInput();
+        appendMessage("user", text);
 
-        if (interviewCompleted) {
-
-            showError(
-                "Interview has already been completed."
-            );
-
-            return;
-        }
-
-
-        /*
-         * Clear input immediately.
-         */
-        responseInput.value = "";
-
-
-        /*
-         * Disable button while waiting for backend.
-         */
-        sendBtn.disabled = true;
-
-        responseInput.disabled = true;
-
-
-        /*
-         * Show candidate answer in UI.
-         *
-         * This function assumes your HTML contains
-         * a suitable chat area. If not, the backend
-         * integration still works.
-         */
-        addCandidateMessage(userText);
-
+        if (userInput) userInput.value = "";
+        setLoading(true);
 
         try {
-
-            if (typingIndicator) {
-                typingIndicator.style.display =
-                    "block";
-            }
-
-
-            const response =
-                await fetch(
-                    INTERVIEW_ENDPOINT,
-                    {
-                        method: "POST",
-
-                        headers: {
-                            "Content-Type":
-                                "application/json"
-                        },
-
-                        body: JSON.stringify({
-
-                            sessionId:
-                                sessionId,
-
-                            message:
-                                userText
-
-                        })
-                    }
-                );
-
-
-            const data =
-                await response.json();
-
-
-            if (!response.ok) {
-
-                throw new Error(
-                    data.detail ||
-                    "Unable to process answer."
-                );
-            }
-
-
-            // ====================================================
-            // INTERVIEW COMPLETED
-            // ====================================================
+            const data = await callInterviewAPI({
+                sessionId: sessionId,
+                message: text
+            });
 
             if (data.done === true) {
-
                 interviewCompleted = true;
-
                 interviewStarted = false;
+                disableInput();
 
-
-                clearInterval(
-                    timerInterval
-                );
-
-
-                streamAIText(
-                    data.reply ||
-                    "Interview completed.",
-                    speechBubble
-                );
-
+                appendMessage("agent", data.reply || "Interview completed.");
 
                 if (data.feedback) {
-
-                    displayFeedback(
-                        data.feedback
-                    );
+                    showFeedback(data.feedback);
                 }
 
-
-                if (sendBtn) {
-                    sendBtn.disabled = true;
-                }
-
-                if (responseInput) {
-                    responseInput.disabled = true;
-                }
-
-
-                if (scoreTextEl) {
-
-                    scoreTextEl.textContent =
-                        "Completed";
-                }
-
-
+                if (endBtn) endBtn.classList.add("hidden");
                 return;
             }
 
+            questionCount++;
+            updateCounter();
 
-            // ====================================================
-            // NEXT QUESTION / FOLLOW-UP
-            // ====================================================
-
-            currentQuestion++;
-
-            updateProgress();
-
-
-            streamAIText(
-                data.reply ||
-                "Please continue.",
-                speechBubble,
-                () => {
-
-                    questionDetails.textContent =
-                        "Follow-up question based on your previous response.";
-
-                }
-            );
-
+            appendMessage("agent", data.reply || "Please continue with your answer.");
 
         } catch (error) {
-
-            console.error(
-                "Interview API Error:",
-                error
-            );
-
-
-            showError(
-                error.message
-            );
-
+            console.error("Send Message Error:", error);
+            appendMessage("system", `Failed to process your response: ${error.message}`);
         } finally {
+            requestInProgress = false;
+            setLoading(false);
 
-            if (!interviewCompleted) {
-
-                sendBtn.disabled = false;
-
-                responseInput.disabled = false;
-
-                responseInput.focus();
-            }
-
-            if (typingIndicator) {
-
-                typingIndicator.style.display =
-                    "none";
+            if (!interviewCompleted && interviewStarted) {
+                if (sendBtn) sendBtn.disabled = false;
+                if (userInput) {
+                    userInput.disabled = false;
+                    userInput.focus();
+                }
             }
         }
     }
-
-
-    // ============================================================
-    // PROGRESS UPDATE
-    // ============================================================
-
-    function updateProgress() {
-
-        if (questionBadge) {
-
-            questionBadge.textContent =
-                `[Q ${currentQuestion}/${totalMinQuestions}]`;
-        }
-
-
-        if (completedQuestionsEl) {
-
-            const completed =
-                Math.max(
-                    currentQuestion - 1,
-                    0
-                );
-
-            completedQuestionsEl.textContent =
-                `${completed}/${totalMinQuestions}`;
-        }
-    }
-
-
-    // ============================================================
-    // CANDIDATE MESSAGE
-    // ============================================================
-
-    function addCandidateMessage(text) {
-
-        /*
-         * If your HTML does not contain a dedicated
-         * chat container, this function simply does
-         * nothing.
-         *
-         * Backend communication is independent.
-         */
-
-        const chatContainer =
-            document.querySelector(
-                ".chat-container"
-            );
-
-        if (!chatContainer) {
-            return;
-        }
-
-
-        const message =
-            document.createElement("div");
-
-        message.className =
-            "candidate-message";
-
-
-        message.textContent =
-            text;
-
-
-        chatContainer.appendChild(
-            message
-        );
-
-
-        chatContainer.scrollTop =
-            chatContainer.scrollHeight;
-    }
-
-
-    // ============================================================
-    // FEEDBACK
-    // ============================================================
-
-    function displayFeedback(feedback) {
-
-        console.log(
-            "FINAL INTERVIEW FEEDBACK:",
-            feedback
-        );
-
-
-        /*
-         * Your current UI can be connected to the
-         * feedback fields here.
-         */
-
-        if (feedback.summary) {
-
-            questionDetails.textContent =
-                feedback.summary;
-        }
-
-
-        if (
-            Array.isArray(
-                feedback.strengths
-            )
-        ) {
-
-            console.log(
-                "Strengths:",
-                feedback.strengths
-            );
-        }
-
-
-        if (
-            Array.isArray(
-                feedback.gaps
-            )
-        ) {
-
-            console.log(
-                "Gaps:",
-                feedback.gaps
-            );
-        }
-
-
-        if (
-            Array.isArray(
-                feedback.next
-            )
-        ) {
-
-            console.log(
-                "Next Steps:",
-                feedback.next
-            );
-        }
-    }
-
-
-    // ============================================================
-    // ERROR DISPLAY
-    // ============================================================
-
-    function showError(message) {
-
-        console.error(
-            "Interview Agent:",
-            message
-        );
-
-
-        if (speechBubble) {
-
-            speechBubble.textContent =
-                `Error: ${message}`;
-        }
-    }
-
-
-    // ============================================================
-    // SEND BUTTON
-    // ============================================================
-
-    sendBtn.addEventListener(
-        "click",
-        handleSendAnswer
-    );
-
-
-    // ============================================================
-    // ENTER KEY
-    // ============================================================
-
-    responseInput.addEventListener(
-        "keypress",
-        (event) => {
-
-            if (
-                event.key === "Enter" &&
-                !event.shiftKey
-            ) {
-
-                event.preventDefault();
-
-                handleSendAnswer();
-            }
-
-        }
-    );
-
 
     // ============================================================
     // END INTERVIEW
     // ============================================================
 
-    endInterviewBtn.addEventListener(
-        "click",
-        () => {
+    function endInterview() {
+        if (!interviewStarted) return;
 
-            if (!interviewStarted) {
-                return;
-            }
+        const confirmed = window.confirm("Are you sure you want to finish the interview?");
+        if (!confirmed) return;
 
+        appendMessage("system", "Please complete the required interview questions so the backend can generate final evaluation.");
+    }
 
-            const confirmed =
-                confirm(
-                    "Are you sure you want to end the interview?"
-                );
+    // ============================================================
+    // SHOW FEEDBACK MODAL
+    // ============================================================
 
+    function showFeedback(feedback) {
+        if (!feedbackContent || !feedbackModal) return;
 
-            if (!confirmed) {
-                return;
-            }
+        feedbackContent.innerHTML = "";
 
-
-            /*
-             * Do NOT call /feedback here.
-             *
-             * The backend should generate final
-             * feedback when the interview reaches
-             * its completion condition.
-             */
-
-            showError(
-                "Complete the required interview questions to generate final feedback."
-            );
+        if (feedback.summary) {
+            const summaryBox = document.createElement("div");
+            summaryBox.className = "p-4 bg-slate-800 rounded-lg border border-slate-700";
+            summaryBox.innerHTML = `
+                <h3 class="font-semibold text-indigo-400 mb-2">Overall Summary</h3>
+                <p class="text-sm text-slate-300">${String(feedback.summary)}</p>
+            `;
+            feedbackContent.appendChild(summaryBox);
         }
-    );
 
+        createFeedbackList("Key Strengths", feedback.strengths, "emerald");
+        createFeedbackList("Areas for Improvement", feedback.gaps, "rose");
+        createFeedbackList("Recommended Next Steps", feedback.next, "indigo");
 
-    // ============================================================
-    // START INTERVIEW AUTOMATICALLY
-    // ============================================================
+        feedbackModal.classList.remove("hidden");
+        feedbackModal.classList.add("flex");
+    }
 
-    startInterview();
+    function createFeedbackList(title, items, color) {
+        if (!Array.isArray(items) || items.length === 0 || !feedbackContent) return;
 
-});
-// ==========================================
-// 1. API Base URL & Main Fetch Function
-// ==========================================
-const API_BASE_URL = "http://127.0.0.1:8000";
+        const section = document.createElement("div");
+        const heading = document.createElement("h3");
+        heading.className = `font-semibold text-${color}-400 mb-2`;
+        heading.textContent = title;
+        section.appendChild(heading);
 
-async function sendDataToBackend(sessionId, candidateProfile, messageText) {
-    try {
-        const response = await fetch(`${API_BASE_URL}/interview`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                sessionId: sessionId,
-                candidate: candidateProfile, 
-                message: messageText
-            })
+        const list = document.createElement("ul");
+        list.className = "space-y-2";
+
+        items.forEach((item) => {
+            const li = document.createElement("li");
+            li.className = "bg-slate-800 border border-slate-700 rounded-lg p-3 text-xs text-slate-300";
+            li.textContent = String(item);
+            list.appendChild(li);
         });
 
-        if (!response.ok) {
-            throw new Error("Server error occurred while connecting to backend.");
+        section.appendChild(list);
+        feedbackContent.appendChild(section);
+    }
+
+    function closeModal() {
+        if (feedbackModal) {
+            feedbackModal.classList.add("hidden");
+            feedbackModal.classList.remove("flex");
         }
-
-        const data = await response.json();
-        return data; // Isme { reply, done, feedback } aayega
-    } catch (error) {
-        console.error("Connection failed:", error);
     }
-}
 
-// ==========================================
-// 2. Event Listeners / UI Logic (Jo pehle se ya aap likh rahe hain)
-// ==========================================
-// Jaise hi user message bhejega, aap is function ko call karenge:
-async function handleUserSubmit(userInput) {
-    let sessionId = "session_123"; // Apni session ID ya candidate object yahan dein
-    let candidateProfile = null;   // Pehli request mein candidate data, baad mein null bhi chalega
-    
-    // Upar wala function call kiya:
-    let result = await sendDataToBackend(sessionId, candidateProfile, userInput);
-    
-    if (result) {
-        console.log("Agent ka jawab:", result.reply);
-        // Yahan UI par message render karne ka code likhein
+    // ============================================================
+    // EVENT LISTENERS
+    // ============================================================
+
+    if (startBtn) startBtn.addEventListener("click", startInterview);
+    if (sendBtn) sendBtn.addEventListener("click", sendMessage);
+    if (endBtn) endBtn.addEventListener("click", endInterview);
+    if (closeModalBtn) closeModalBtn.addEventListener("click", closeModal);
+
+    if (userInput) {
+        userInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        });
     }
-}
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            closeModal();
+        }
+    });
+
+});

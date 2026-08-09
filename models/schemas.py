@@ -122,8 +122,9 @@ class InterviewRequest(BaseModel):
     Request received by the interview API.
     """
 
-    sessionId: str
-    candidate: Optional[CandidateProfile] = None
+    sessionId: Optional[str] = None
+    candidateId: Optional[str] = None
+    candidate: Optional[dict] = None
     message: Optional[str] = None
 
 
