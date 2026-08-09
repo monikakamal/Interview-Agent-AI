@@ -1,0 +1,22 @@
+# Environment variables (API Keys & secrets)
+.env
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python Cache & Compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+
+# OS generated files
+.DS_Store
+Thumbs.db
